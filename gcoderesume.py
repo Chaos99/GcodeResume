@@ -14,7 +14,7 @@ group = parser.add_mutually_exclusive_group(required=True)
 group.add_argument('-l', '--layer',  action='store', type=int, default=None, metavar='layer', help='The layer at which to continue printing')
 group.add_argument('-z', '--zheight', action='store', type=float, default=None, metavar='height', help='The height at which to continue printing')
 
-parser.add_argument('-e', '--epsilon', action='store', type=float, default=0.1, metavar='epsilon', help='When to still print the layer even if the height is missed by that much')
+parser.add_argument('-e', '--epsilon', action='store', type=float, default=0.05, metavar='epsilon', help='When to still print the layer even if the height is missed by that much')
 
 args = parser.parse_args()
 
