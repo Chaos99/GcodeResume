@@ -10,6 +10,8 @@ group = parser.add_mutually_exclusive_group(required=True)
 group.add_argument('-l', '--layer',  action='store', type=int, default=None, metavar='layer', help='The layer at which to continue printing')
 group.add_argument('-z', '--zheight', action='store', type=float, default=None, metavar='height', help='The height at which to continue printing')
 
+parser.add_argument('-e', '--epsilon', action='store', type=float, default=0.1, metavar='epsilon', help='When to still print the layer even if the height is missed by that much')
+
 args = parser.parse_args()
 
 
@@ -76,10 +78,13 @@ class rewindable_iterator(object):
 #todo:
 
 startLayer0 = None
+cutPosition = None
 repeat = False
 extrude = None
 layer = None
 height = None
+xCoord = None
+yCoord = None
 
 with open(args.filename) as f:  
     #re-instantiate as iterator with look-back and look-ahead
@@ -92,7 +97,8 @@ with open(args.filename) as f:
             startLayer0 = endOfLastLine 
         if ';LAYER:' in line:              
             # get current layer number
-            layer = int(line.split(':')[1].strip())    
+            layer = int(line.split(':')[1].strip())
+            cutPosition = endOfLastLine
             
 #search for height
             nextLine = fplus.ahead()
@@ -102,7 +108,7 @@ with open(args.filename) as f:
                     if 'Z' in part:
                         #get the next height value
                         height=float(part[1:])
-#get layer number
+#get extrusion of last layer
             lastLine = fplus.last()                
             if ('G1' in lastLine or 'G0'in lastLine) and 'E' in lastLine:
                 command = lastLine.split(' ')
@@ -110,21 +116,36 @@ with open(args.filename) as f:
                     if 'E' in part:
                         #get the last extrusion value
                         extrude=float(part[1:])
+#get xy position of first new point                        
+                    if 'X' in part:
+                        xCoord = float(part[1:])
+                    if 'Y' in part:
+                        yCoord = float(part[1:])
             
         endOfLastLine = fplus.tell()
 
+#search for layer or height
+        #if given height is reached or only slightly missed or if layer is reached
+        if (args.zheight and \
+           ( args.zheight >= height or (args.zheight - height )<= args.epsilon)) or \
+           ( args.layer and args.layer == layer):
+            break
+
+
+
 if startLayer0:
     print startLayer0
+if cutPosition:
+    print cutPosition
 if extrude:
+    print xCoord 
+    print yCoord
     print extrude
 if height:
     print height
     
 
 
-#get height
-#get extrusion of last layer
-#get xy position of first point
 #delete non-wanted code
 #insert post-init move to height + safety
 #insert extrusion set to last layers value
