@@ -12,58 +12,116 @@ group.add_argument('-z', '--zheight', action='store', type=float, default=None, 
 
 args = parser.parse_args()
 
+
+class rewindable_iterator(object):
+    not_started = object()
+
+    def __init__(self, iterator):
+        self._iter = iter(iterator)
+        self._is_first = True
+        self._is_last = False
+        self._last = self.not_started
+        self._current = self.not_started
+        self._next = self.not_started
+
+    def __iter__(self):
+        return self
+
+    def next(self):
+        #call next() two times on first run
+        if self._is_first:
+            self._current = self._iter.next()
+            try:
+                #will fail on one-element lists
+                self._next = self._iter.next()
+            except StopIteration:
+                self._is_last = True
+                self._next = self.not_started
+            #continue normally from here
+            self._is_first = False
+        
+        #seems like raising thos is normal at the end
+        elif self._is_last:
+            raise StopIteration
+        
+        #normal case, rotate through
+        else:
+            self._last = self._current
+            self._current = self._next            
+            try:
+                self._next = self._iter.next()
+            except StopIteration:
+                self._is_last = True
+                self._next = self.not_started
+                
+        return self._current
+
+    def last(self):
+        if self._is_first:
+            raise RuntimeError("Tried to get line before the first.")
+        else:
+            return self._last
+        
+    def ahead(self):
+        if self._is_last:
+            raise RuntimeError("Tried to get next line after last.")
+        else:
+            return self._next
+            
+    def tell(self):
+        return self._iter.tell()
+        
+    def seek(self, num):
+        return self._iter.seek(num)
 #todo:
 
-#get post-header code point
 startLayer0 = None
-endOfLastLine = None
-endOfSecondToLastLine = None
 repeat = False
 extrude = None
 layer = None
+height = None
 
-with open(args.filename) as f:   
-    for line in f:   
-        #remember positions of last 3 lines
-        endOfThirdToLastLine = endOfSecondToLastLine
-        endOfSecondToLastLine = endOfLastLine
-        endOfLastLine = f.tell()
+with open(args.filename) as f:  
+    #re-instantiate as iterator with look-back and look-ahead
+    fplus = rewindable_iterator(f)
+    for line in fplus:   
+        endOfLastLine = fplus.tell()
+#get post-header code point
         if ';LAYER:0' in line:
             #get position to cut later on
             startLayer0 = endOfLastLine 
-        if ';LAYER:' in line:   
-            #security block, because we will come back to this after the backtracking
-            if repeat: 
-                repeat = False
-                continue
+        if ';LAYER:' in line:              
             # get current layer number
-            layer = int(line.split(':')[1].strip())
+            layer = int(line.split(':')[1].strip())    
             
-            # if layer number given as parameter, search for it
-            if args.layer and layer == args.layer:
-                repeat = True
-                #jump back to last line
-                f.seek(endOfSecondToLastLine)
-                lastLine = f.readline() #reads just the newline char
-                lastLine = f.readline()
-                if ('G1' in lastLine or 'G0'in lastLine) and 'E' in lastLine:
-                    command = lastLine.split(' ')
-                    for part in command:
-                        if 'E' in part:
-                            #get the last extrusion value
-                            extrude=float(part[1:])
-                
-        endOfLastLine = f.tell()
+#search for height
+            nextLine = fplus.ahead()
+            if ('G1' in nextLine or 'G0'in nextLine) and 'Z' in nextLine:
+                command = nextLine.split(' ')
+                for part in command:
+                    if 'Z' in part:
+                        #get the next height value
+                        height=float(part[1:])
+#get layer number
+            lastLine = fplus.last()                
+            if ('G1' in lastLine or 'G0'in lastLine) and 'E' in lastLine:
+                command = lastLine.split(' ')
+                for part in command:
+                    if 'E' in part:
+                        #get the last extrusion value
+                        extrude=float(part[1:])
+            
+        endOfLastLine = fplus.tell()
 
 if startLayer0:
     print startLayer0
 if extrude:
     print extrude
+if height:
+    print height
     
 
-#search for height if possible
 
-#get layer number
 #get height
 #get extrusion of last layer
 #get xy position of first point
