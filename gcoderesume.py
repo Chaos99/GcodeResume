@@ -86,7 +86,7 @@ height = None
 xCoord = None
 yCoord = None
 
-with open(args.filename) as f:  
+with open(args.filename, mode='r+t') as f:  
     #re-instantiate as iterator with look-back and look-ahead
     fplus = rewindable_iterator(f)
     for line in fplus:   
@@ -131,7 +131,17 @@ with open(args.filename) as f:
            ( args.layer and args.layer == layer):
             break
 
+#insert extrusion set to last layers value
+resetExtrusionCommand = "G92 E{0:.5f}".format(extrude)
 
+#insert post-init move to height + safety
+gotoHeightCommand = "G0 X0 Y0 Z{0:.2f}".format(height+10)
+
+gotoStartCommand = "G1 X{0:.2f} Y{0:.2f} Z{0:.2f}".format(xCoord, yCoord, height+1)
+
+
+print resetExtrusionCommand
+print gotoHeightCommand
 
 if startLayer0:
     print startLayer0
@@ -147,7 +157,5 @@ if height:
 
 
 #delete non-wanted code
-#insert post-init move to height + safety
-#insert extrusion set to last layers value
 #save file
 #return x,y of first point to calling program
