@@ -5,6 +5,8 @@ Created on Mon Sep 22 00:16:32 2014
 @author: Chaos
 """
 
+from collections import deque
+
 
 class windowIterator(object):
     """ An iterator wrapper with look-ahead/-behind """
@@ -14,62 +16,65 @@ class windowIterator(object):
         """ Create wrapper around original iterator with
         configurable history/look-ahead buffer
         """
+        self._size = num
+        self._timeline = deque(maxlen=2*num+1)
         self._iter = iter(iterator)
         self._is_first = True
-        self._is_last = False
-        self._last = self.not_started
         self._current = self.not_started
-        self._next = self.not_started
 
     def __iter__(self):
         return self
 
     def next(self):
         """Get next element"""
-        #call next() two times on first run
+        #call next() several times on first run
         if self._is_first:
-            self._current = self._iter.next()
-            try:
-                #will fail on one-element lists
-                self._next = self._iter.next()
-            except StopIteration:
-                self._is_last = True
-                self._next = self.not_started
+            for _ in xrange(self._size + 1):
+                try:
+                    self._timeline.append(self._iter.next())
+                except StopIteration:
+                    self._timeline.append(None)
+            self._current = self._timeline[self._size]
             #continue normally from here
             self._is_first = False
 
-        #seems like raising thos is normal at the end
-        elif self._is_last:
-            raise StopIteration
-
         #normal case, rotate through
         else:
-            self._last = self._current
-            self._current = self._next
             try:
-                self._next = self._iter.next()
+                self._timeline.append(self._iter.next())
             except StopIteration:
-                self._is_last = True
-                self._next = self.not_started
+                self._timeline.append(None)
+            self._current = self._timeline[self._size]
+
+        if not self._current:
+            raise StopIteration
 
         return self._current
 
-    def last(self):
-        """Get last element from history.
+    def last(self, index=1):
+        """Get element from history.
 
         (does not alter the current position)
         """
-        if self._is_first:
-            raise RuntimeError("Tried to get line before the first.")
-        else:
-            return self._last
+        if index > self._size:
+            raise RuntimeError("Exceeded buffer size, out of bounds.")
 
-    def ahead(self):
-        """Get next element from look-ahead buffer.
+        if self._timeline[self._size - index]:
+            return self._timeline[self._size - index]
+        else:
+            raise RuntimeWarning("History not yet old enough.")
+            return self._timeline[self._size - index]
+
+    def ahead(self, index=1):
+        """Get future element from look-ahead buffer.
 
         (does not alter the current position)
         """
-        if self._is_last:
-            raise RuntimeError("Tried to get next line after last.")
+        if index > self._size:
+            raise RuntimeError("Exceeded buffer size, out of bounds.")
+
+        if self._timeline[self._size + index]:
+            return self._timeline[self._size + index]
         else:
-            return self._next
+            raise RuntimeWarning("Not enough elements left.")
+            return self._timeline[self._size + index]
