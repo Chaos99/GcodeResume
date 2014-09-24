@@ -5,6 +5,13 @@ import tempfile
 from sys import exit
 from os import remove
 from shutil import copy
+from helpers import windowIterator
+import logging
+
+log = logging.getLogger(__name__)
+log.setLevel(logging.WARN)
+if not log.handlers:
+    log.addHandler(logging.StreamHandler())
 
 parser = argparse.ArgumentParser(description='Read and modify Gcode')
 
@@ -27,70 +34,43 @@ parser.add_argument('-e', '--epsilon', action='store', type=float,
 args = parser.parse_args()
 
 
-class rewindable_iterator(object):
-    """ An iterator wrapper with look-ahead/-behind """
-    not_started = object()
+def getCoords(fileIterator, searchRadius):
+    '''search for z coordinate in G0/G1 command in next lines'''
+    xCoord = None
+    yCoord = None
+    zCoord = None
+    for line in xrange(searchRadius):
+        nextLine = fileIterator.ahead(line)
+        if ('G1' in nextLine or 'G0'in nextLine) and 'Z' in nextLine:
+            command = nextLine.split(' ')
+            for part in command:
+                if 'X' in part:
+                    xCoord = float(part[1:])
+                if 'Y' in part:
+                    yCoord = float(part[1:])
+                if 'Z' in part:
+                    zCoord = float(part[1:])
+            if xCoord and yCoord and zCoord:
+                log.debug("Found x=%f, y=%f, z=%f", xCoord, yCoord, zCoord)
+                return xCoord, yCoord, zCoord
+    # this is only reached if no complete coordinate set is found
+    raise RuntimeError("No next G1/G0 command with x/y/z coords "
+                       "found in next {} lines".format(searchRadius))
 
-    def __init__(self, iterator):
-        self._iter = iter(iterator)
-        self._is_first = True
-        self._is_last = False
-        self._last = self.not_started
-        self._current = self.not_started
-        self._next = self.not_started
 
-    def __iter__(self):
-        return self
-
-    def next(self):
-        """Get next element"""
-        #call next() two times on first run
-        if self._is_first:
-            self._current = self._iter.next()
-            try:
-                #will fail on one-element lists
-                self._next = self._iter.next()
-            except StopIteration:
-                self._is_last = True
-                self._next = self.not_started
-            #continue normally from here
-            self._is_first = False
-
-        #seems like raising thos is normal at the end
-        elif self._is_last:
-            raise StopIteration
-
-        #normal case, rotate through
-        else:
-            self._last = self._current
-            self._current = self._next
-            try:
-                self._next = self._iter.next()
-            except StopIteration:
-                self._is_last = True
-                self._next = self.not_started
-
-        return self._current
-
-    def last(self):
-        """Get last element from history.
-
-        (does not alter the current position)
-        """
-        if self._is_first:
-            raise RuntimeError("Tried to get line before the first.")
-        else:
-            return self._last
-
-    def ahead(self):
-        """Get next element from look-ahead buffer.
-
-        (does not alter the current position)
-        """
-        if self._is_last:
-            raise RuntimeError("Tried to get next line after last.")
-        else:
-            return self._next
+def getExtrusion(fileIterator, searchRadius):
+    '''search for extrusion parameter in G0/G1 command in last lines'''
+    for line in xrange(searchRadius):
+        lastLine = fileIterator.last(line)
+        if ('G1' in lastLine or 'G0'in lastLine) and 'E' in lastLine:
+            command = lastLine.split(' ')
+            for part in command:
+                if 'E' in part:
+                    #get the last extrusion value
+                    extrude = float(part[1:])
+                    return extrude  # leave if found
+    raise RuntimeError("No previous G1/G0 command with extrusion value "
+                       "found in last {} lines".format(searchRadius))
 
 
 extrude = None
@@ -99,15 +79,18 @@ height = 0.0
 xCoord = None
 yCoord = None
 stop = False
+history = 5
+
 
 #create temp file to copy content line by line
 w = tempfile.NamedTemporaryFile(mode='w+t', delete=False)
 temp_name = w.name
 
+
 #open original for reading
 with open(args.filename, mode='rt') as f:
     #re-instantiate as iterator with look-back and look-ahead
-    fplus = rewindable_iterator(f)
+    fplus = windowIterator(f, history)
     for line in fplus:
 #get post-header code point
         if ';LAYER:0' in line:
@@ -117,28 +100,10 @@ with open(args.filename, mode='rt') as f:
         if stop and ';LAYER:' in line:
             # get current layer number
             layer = int(line.split(':')[1].strip())
+            log.debug("Layer: %d", layer)
 #search for height
-            nextLine = fplus.ahead()
-            if ('G1' in nextLine or 'G0'in nextLine) and 'Z' in nextLine:
-                command = nextLine.split(' ')
-                for part in command:
-                    if 'Z' in part:
-                        #get the next height value
-                        height = float(part[1:])
-#get extrusion of last layer
-            lastLine = fplus.last()
-
-            if ('G1' in lastLine or 'G0'in lastLine) and 'E' in lastLine:
-                command = lastLine.split(' ')
-                for part in command:
-                    if 'E' in part:
-                        #get the last extrusion value
-                        extrude = float(part[1:])
 #get xy position of first new point
-                    if 'X' in part:
-                        xCoord = float(part[1:])
-                    if 'Y' in part:
-                        yCoord = float(part[1:])
+            xCoord, yCoord, height = getCoords(fplus, history)
 
 #search for layer or height
         #if given height is reached or only slightly missed or
@@ -146,22 +111,32 @@ with open(args.filename, mode='rt') as f:
         if (stop and
             ((args.zheight and
              (args.zheight <= height or
-              abs(args.zheight - height) <= args.epsilon))
-             or
+              abs(args.zheight - height) <= args.epsilon)) or
              (args.layer and args.layer == layer))):
+            if args.layer:
+                log.debug("\nFound layer %d at:\n%s",
+                          args.layer, fplus.debug())
+            elif args.zheight:
+                log.debug("\nFound height %f at:\n%s",
+                          args.zheight, fplus.debug())
 
+            #get extrusion of last layer
+            extrude = getExtrusion(fplus, history)
             #insert extrusion set to last layers value
             if extrude:
                 resetExtrusionCommand = "G92 E{0:.5f}\n".format(extrude)
+                log.debug("Reset extrusion: " + resetExtrusionCommand)
                 w.write(resetExtrusionCommand)
             else:
                 raise RuntimeWarning("No Extrusion value found.")
             #insert post-init move to height + safety
             gotoHeightCommand = "G0 X0 Y0 Z{0:.2f}\n".format(height+10)
+            log.debug("Go to Height: " + gotoHeightCommand)
             w.write(gotoHeightCommand)
             gotoStartCommand = "G0 X{0:.2f} Y{0:.2f} Z{0:.2f}".format(xCoord,
                                                                       yCoord,
                                                                       height+1)
+            log.debug("Go to Start: " + gotoStartCommand)
             #continue copying lines to new file
             stop = False
 
