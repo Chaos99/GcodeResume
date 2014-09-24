@@ -1,4 +1,4 @@
-== README ==
+## README
 Python script that changes a GCODE file produced with CuraEngine
 to only print from a certain layer or certain height.
 
@@ -10,7 +10,7 @@ The error margin specifies, how much the layer height can be smaller than the gi
 still begin printing with that layer. Default is 0.05.
 
 
-== License ==
+## License
 Copyright 2014 by Chaos99
 
 GcodeResume is free software: you can redistribute it and/or modify
