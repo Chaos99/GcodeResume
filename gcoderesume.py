@@ -6,6 +6,12 @@ from sys import exit
 from os import remove
 from shutil import copy
 from helpers import windowIterator
+import logging
+
+log = logging.getLogger(__name__)
+log.setLevel(logging.DEBUG)
+if not log.handlers:
+    log.addHandler(logging.StreamHandler())
 
 parser = argparse.ArgumentParser(description='Read and modify Gcode')
 
@@ -42,7 +48,7 @@ temp_name = w.name
 #open original for reading
 with open(args.filename, mode='rt') as f:
     #re-instantiate as iterator with look-back and look-ahead
-    fplus = windowIterator(f, 1)
+    fplus = windowIterator(f, 3)
     for line in fplus:
 #get post-header code point
         if ';LAYER:0' in line:
@@ -85,14 +91,17 @@ with open(args.filename, mode='rt') as f:
              or
              (args.layer and args.layer == layer))):
 
+            log.debug("%s", fplus.debug())
             #insert extrusion set to last layers value
             if extrude:
                 resetExtrusionCommand = "G92 E{0:.5f}\n".format(extrude)
+                log.debug("G92 E%.5f\n", extrude)
                 w.write(resetExtrusionCommand)
             else:
                 raise RuntimeWarning("No Extrusion value found.")
             #insert post-init move to height + safety
             gotoHeightCommand = "G0 X0 Y0 Z{0:.2f}\n".format(height+10)
+            log.debug("G0 X0 Y0 Z%.2f\n", height+10)
             w.write(gotoHeightCommand)
             gotoStartCommand = "G0 X{0:.2f} Y{0:.2f} Z{0:.2f}".format(xCoord,
                                                                       yCoord,

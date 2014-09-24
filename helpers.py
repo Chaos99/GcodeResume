@@ -78,3 +78,15 @@ class windowIterator(object):
         else:
             raise RuntimeWarning("Not enough elements left.")
             return self._timeline[self._size + index]
+
+    def debug(self):
+        msg = "read buffer (size: {}) content:\n".format(self._size)
+        msg += "past\n"
+        for (index, element) in zip(xrange((2 * self._size) + 1),
+                                    self._timeline):
+            if index == self._size:
+                msg += "present >> {}\n".format(element[:-1])
+            else:
+                msg += element
+        msg += "future\n"
+        return msg
